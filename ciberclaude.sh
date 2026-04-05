@@ -38,7 +38,7 @@ PROJECT=$(_san "$PROJECT")
 
 # ── Valores derivados ─────────────────────────────────────────
 PCT=$(printf '%.0f' "${PCT_RAW:-0}" 2>/dev/null || echo "0")
-COST_NUM=$(printf '%.4f' "${COST:-0}" 2>/dev/null || echo "0.0000")
+COST_NUM=$(printf '%.2f' "${COST:-0}" 2>/dev/null || echo "0.00")
 COST_FMT="\$${COST_NUM}"
 
 # Rama git del directorio actual (silencioso si no es un repo)

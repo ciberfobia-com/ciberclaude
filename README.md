@@ -1,6 +1,6 @@
 # ⚡ ciberclaude
 
-Barra de estado para Claude Code. Muestra modelo, contexto, coste, proyecto, rate limits y agentes activos — en tiempo real, en la parte inferior de tu terminal.
+Barra de estado para [Claude Code](https://claude.ai/code). Muestra modelo, contexto, coste, proyecto, rate limits y agentes activos — en tiempo real, en la parte inferior de tu terminal.
 
 ---
 
