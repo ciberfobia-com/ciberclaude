@@ -18,9 +18,11 @@ PCT_RAW=$( printf '%s' "$INPUT" | jq -r '.context_window.used_percentage // 0')
 COST=$(    printf '%s' "$INPUT" | jq -r '.cost.total_cost_usd // 0')
 DURATION=$(printf '%s' "$INPUT" | jq -r '.cost.total_duration_ms // 0')
 CWD=$(     printf '%s' "$INPUT" | jq -r '.cwd // ""')
-AGENT=$(   printf '%s' "$INPUT" | jq -r '.agent.name // ""')
-FIVE_H=$(  printf '%s' "$INPUT" | jq -r 'if (.rate_limits.five_hour.used_percentage  | type) == "number" then .rate_limits.five_hour.used_percentage  else "" end')
-SEVEN_D=$( printf '%s' "$INPUT" | jq -r 'if (.rate_limits.seven_day.used_percentage  | type) == "number" then .rate_limits.seven_day.used_percentage  else "" end')
+AGENT=$(        printf '%s' "$INPUT" | jq -r '.agent.name // ""')
+AGENTS_COUNT=$( printf '%s' "$INPUT" | jq -r 'if (.agents | type) == "array" then (.agents | length) elif ((.agent.name // "") != "") then 1 else 0 end' 2>/dev/null || echo "0")
+FIVE_H=$(       printf '%s' "$INPUT" | jq -r 'if (.rate_limits.five_hour.used_percentage  | type) == "number" then .rate_limits.five_hour.used_percentage  else "" end')
+SEVEN_D=$(      printf '%s' "$INPUT" | jq -r 'if (.rate_limits.seven_day.used_percentage  | type) == "number" then .rate_limits.seven_day.used_percentage  else "" end')
+PERMS=$(        printf '%s' "$INPUT" | jq -r '.permissions.mode // ""')
 
 # ── Sanitizar strings de usuario antes de printf %b ──────────
 # printf '%b' interpreta secuencias \NNN, \033, \c, etc.
@@ -29,6 +31,7 @@ SEVEN_D=$( printf '%s' "$INPUT" | jq -r 'if (.rate_limits.seven_day.used_percent
 _san() { printf '%s' "$1" | tr -d '\\\000-\037'; }
 MODEL=$(  _san "$MODEL")
 AGENT=$(  _san "$AGENT")
+PERMS=$(  _san "$PERMS")
 PROJECT=$(basename "${CWD:-/unknown}")
 PROJECT=$(_san "$PROJECT")
 [ -z "$PROJECT" ] || [ "$PROJECT" = "/" ] && PROJECT="–"
@@ -68,35 +71,34 @@ GREEN='\033[32m'; YELLOW='\033[33m'; RED='\033[31m'
 
 SEP="${DIM} · ${R}"
 
-# ── Línea 1: modelo · contexto · coste · proyecto [· rama] ───
+# ── Línea 1: modelo · contexto · coste · proyecto [· rama] [· perms] ─
 L1="${CYAN}⚡ ${MODEL}${R}"
 L1="${L1}${SEP}${CBAR}${BAR} ${PCT}%${R}"
 L1="${L1}${SEP}${DIM}${COST_FMT}${R}"
 L1="${L1}${SEP}📁 ${PROJECT}"
 [ -n "$GIT_BRANCH" ] && L1="${L1}${DIM} (${GIT_BRANCH})${R}"
+[ "$PERMS" = "auto" ] && L1="${L1}${SEP}${YELLOW}🔓 auto${R}"
 
-# ── Línea 2: hora · agente · duración · rate limits ──────────
-NOW=$(date '+%H:%M')
-L2="${DIM}${NOW}${R}"
+# ── Línea 2: agente(s) · rate limits ─────────────────────────
+L2=""
 
-[ -n "$AGENT" ] && L2="${L2}${SEP}🤖 ${AGENT}"
-
-if [ -n "$DUR_FMT" ]; then
-  L2="${L2}${SEP}${DIM}⏱ ${DUR_FMT}${R}"
+# Agente(s)
+if [ "$AGENTS_COUNT" -gt 1 ] 2>/dev/null; then
+  L2="🤖 ${AGENTS_COUNT} agentes"
+elif [ -n "$AGENT" ]; then
+  L2="🤖 ${AGENT}"
 fi
 
-# Rate limits: solo se muestran si alguno supera el 50%
+# Rate limits (siempre si hay datos)
 if [ -n "$FIVE_H" ] && [ -n "$SEVEN_D" ]; then
   FH=$(printf '%.0f' "$FIVE_H")
   SD=$(printf '%.0f' "$SEVEN_D")
-  if [ "$FH" -ge 50 ] || [ "$SD" -ge 50 ]; then
-    L2="${L2}${SEP}"
-    [ "$FH" -ge 80 ] && C5="$RED" || C5="$YELLOW"
-    [ "$SD" -ge 80 ] && C7="$RED" || C7="$YELLOW"
-    L2="${L2}${C5}5h:${FH}%${R}${DIM} · ${R}${C7}7d:${SD}%${R}"
-  fi
+  [ "$FH" -ge 80 ] && C5="$RED" || { [ "$FH" -ge 50 ] && C5="$YELLOW" || C5="$DIM"; }
+  [ "$SD" -ge 80 ] && C7="$RED" || { [ "$SD" -ge 50 ] && C7="$YELLOW" || C7="$DIM"; }
+  RL="${C5}⏳ 5h ${FH}%${R}${SEP}${C7}📅 7d ${SD}%${R}"
+  [ -n "$L2" ] && L2="${L2}${SEP}${RL}" || L2="$RL"
 fi
 
 # ── Output ────────────────────────────────────────────────────
 printf '%b\n' "$L1"
-printf '%b\n' "   ${L2}"
+[ -n "$L2" ] && printf '%b\n' "   ${L2}"
