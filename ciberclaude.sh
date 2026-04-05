@@ -94,7 +94,7 @@ if [ -n "$FIVE_H" ] && [ -n "$SEVEN_D" ]; then
   SD=$(printf '%.0f' "$SEVEN_D")
   [ "$FH" -ge 80 ] && C5="$RED" || { [ "$FH" -ge 50 ] && C5="$YELLOW" || C5="$DIM"; }
   [ "$SD" -ge 80 ] && C7="$RED" || { [ "$SD" -ge 50 ] && C7="$YELLOW" || C7="$DIM"; }
-  L2="${L2}${SEP}${DIM}RESET${R} ${C5}⏳ 5h ${FH}%${R}${SEP}${C7}📅 7d ${SD}%${R}"
+  L2="${L2} ${DIM}RESET${R} ${C5}⏳ 5h ${FH}%${R}${SEP}${C7}📅 7d ${SD}%${R}"
 fi
 
 # Agente(s)
