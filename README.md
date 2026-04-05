@@ -1,77 +1,38 @@
 # ⚡ ciberclaude
 
-> Plugin de statusline para [Claude Code](https://claude.ai/code). Muestra información útil de la sesión en la barra inferior del terminal.
+Barra de estado para [Claude Code](https://claude.ai/code). Muestra modelo, contexto, coste, proyecto, rate limits y agentes activos — en tiempo real, en la parte inferior de tu terminal.
 
 ---
 
-## Instalación
+## Instalar
 
 ```bash
 curl -fsSL https://ciberfobia.com/ciberclaude | bash
 ```
 
-**Requisito:** [`jq`](https://jqlang.github.io/jq/) — el installer detecta tu sistema operativo y te dice exactamente cómo instalarlo si no lo tienes.
+Eso es todo. El installer detecta tu sistema, instala lo necesario y activa la barra automáticamente.
 
-Reinicia Claude Code después de instalar.
-
----
-
-## Qué muestra
-
-El statusline ocupa **dos líneas** en la parte inferior de Claude Code:
-
-```
-⚡ Sonnet  ·  ████████░░ 78%  ·  $0.0312  ·  📁 ciberfobia-os (main)  ·  🔓 auto
-💚 · ⏳ 5h 82%  ·  📅 7d 41%  ·  🤖 frontend-developer
-```
-
-### Línea 1 — siempre visible
-
-| Elemento | Descripción |
-|----------|-------------|
-| `⚡ Sonnet` | Modelo activo: Opus, Sonnet o Haiku |
-| `████████░░ 78%` | Uso del contexto. Verde `<50%` → Amarillo `≥50%` → Rojo `≥80%` |
-| `$0.0312` | Coste acumulado de la sesión en USD |
-| `📁 proyecto` | Nombre del directorio de trabajo actual |
-| `(main)` | Rama git activa (solo si el directorio es un repo git) |
-| `🔓 auto` | Solo aparece cuando el modo de permisos es `auto-approve` |
-
-### Línea 2 — siempre visible
-
-| Elemento | Descripción |
-|----------|-------------|
-| `❤️` / `🧡` / `💛` / `💚` / `💙` / `💜` / `🩷` | Corazón animado: rota de color cada 20 segundos |
-| `⏳ 5h 82%` | Rate limit de la ventana de 5 horas. Amarillo `≥50%`, Rojo `≥80%`, tenue si está bajo |
-| `📅 7d 41%` | Rate limit de los últimos 7 días. Mismos umbrales de color |
-| `🤖 agente` | Agente especializado activo. Si hay varios: `🤖 3 agentes` |
-
-> Los rate limits siempre se muestran cuando hay datos disponibles (no solo cuando superan un umbral).
+> **Requisito:** [`jq`](https://jqlang.github.io/jq/) — si no lo tienes, el installer te dice exactamente cómo instalarlo.
 
 ---
 
-## Instalación alternativa
+## Qué verás
 
-Sin `curl`:
-
-```bash
-git clone https://github.com/ciberfobia-com/ciberclaude.git
-cd ciberclaude
-bash install.sh
+```
+⚡ Sonnet  ·  ████████░░ 78%  ·  $0.03  ·  📁 mi-proyecto (main)
+💚 RESET ⏳ 5h 18%  ·  📅 7d 41%  ·  🤖 –
 ```
 
-Manual (solo el script):
-
-```bash
-# 1. Descargar
-curl -fsSL https://raw.githubusercontent.com/ciberfobia-com/ciberclaude/main/ciberclaude.sh \
-  -o ~/.claude/ciberclaude.sh
-chmod 700 ~/.claude/ciberclaude.sh
-
-# 2. Añadir a ~/.claude/settings.json
-# (si ya tienes settings.json, añade solo el campo statusLine)
-echo '{"statusLine":{"type":"command","command":"~/.claude/ciberclaude.sh"}}' \
-  > ~/.claude/settings.json
-```
+| Elemento | Qué es |
+|----------|--------|
+| `⚡ Sonnet` | Modelo activo |
+| `████░░░░░░ 78%` | Uso del contexto (verde → amarillo → rojo) |
+| `$0.03` | Coste acumulado de la sesión |
+| `📁 proyecto (main)` | Directorio y rama git |
+| `🔓 auto` | Aparece cuando el modo de permisos es auto-approve |
+| `💚` | Corazón animado — cambia de color cada 20 segundos |
+| `RESET ⏳ 5h` / `📅 7d` | Rate limits de uso (se colorean al acercarse al límite) |
+| `🤖 nombre` | Agente activo. Sin agente: `–`. Varios: `🤖 3 agentes` |
 
 ---
 
@@ -85,49 +46,26 @@ curl -fsSL https://raw.githubusercontent.com/ciberfobia-com/ciberclaude/main/uni
 
 ## Compatibilidad
 
-| Plataforma | Estado |
-|-----------|--------|
-| macOS (Terminal, iTerm2, Warp, Ghostty) | ✓ |
-| Linux bash 3.2+ | ✓ |
-| Windows WSL2 | ✓ |
-| Claude Code CLI | ✓ |
-| Claude Code Desktop | ✓ |
+macOS · Linux · Windows WSL2 · Claude Code CLI · Claude Code Desktop
 
 ---
 
 ## Cómo funciona
 
-Claude Code ejecuta el script tras cada respuesta del asistente. Le envía un JSON por stdin con el estado completo de la sesión. El script lo parsea con `jq` y escribe texto a stdout, que Claude Code renderiza en la barra inferior.
+Claude Code ejecuta el script tras cada respuesta y le pasa el estado de la sesión como JSON. El script lo procesa con `jq` y devuelve el texto que aparece en la barra.
 
-```
-Claude Code  →  JSON (stdin)  →  ciberclaude.sh  →  texto ANSI (stdout)  →  barra inferior
-```
-
-**El corazón animado** rota entre 7 colores (❤️ 🧡 💛 💚 💙 💜 🩷) sin ningún proceso en segundo plano. Cada vez que el script se ejecuta calcula `$(date +%s) / 20 % 7` para determinar el color actual. Sin timers, sin estado persistente — 100% determinista a partir del timestamp del sistema.
-
-**El script corre 100% local.** No hace peticiones externas, no accede a credenciales, no requiere permisos de administrador, no modifica nada fuera de `~/.claude/`.
+100% local. Sin peticiones externas, sin credenciales, sin `sudo`.
 
 ---
 
 ## Seguridad
 
-- Sin `sudo`. Solo escribe en `~/.claude/` (tu directorio de configuración)
-- `umask 077`: archivos instalados solo legibles por ti
-- `chmod 700` en el script: solo el propietario puede ejecutarlo
-- Descarga a archivo temporal + `mv` atómico: si la descarga falla, tu instalación anterior no se corrompe
-- `--proto '=https' --tlsv1.2`: fuerza HTTPS con TLS 1.2 mínimo en la descarga
-- Strings de usuario sanitizados antes de `printf %b`: previene inyección de secuencias de escape desde nombres de directorio o agentes maliciosos
-- Backup automático de `settings.json` con rollback si el merge falla
-- Verificación de que el archivo descargado es un script bash válido antes de instalarlo
+- Solo escribe en `~/.claude/` — nada fuera de tu config
+- `umask 077` + `chmod 700`: archivos solo legibles por ti
+- Descarga atómica con backup automático de `settings.json`
+- HTTPS con TLS 1.2 mínimo en la descarga
+- Inputs sanitizados antes de procesarse
 
 ---
 
-## Créditos
-
-Hecho por [Ciberfobia](https://ciberfobia.com) — automatización e IA para empresas.
-
----
-
-## Licencia
-
-MIT
+Hecho por [Ciberfobia](https://ciberfobia.com) · MIT
