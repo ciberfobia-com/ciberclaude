@@ -16,7 +16,7 @@ fi
 # ── Detectar herramienta ──────────────────────────────────────
 # Claude Code:  tiene context_window
 # Codex CLI:    tiene permission_mode (sin context_window)
-# Gemini CLI:   tiene hook_event_name (sin permission_mode ni context_window)
+# Gemini CLI:   tiene hook_event_name (sin los anteriores)
 TOOL="unknown"
 if printf '%s' "$INPUT" | jq -e '.context_window' &>/dev/null; then
   TOOL="claude"
@@ -26,7 +26,8 @@ elif printf '%s' "$INPUT" | jq -e '.hook_event_name' &>/dev/null; then
   TOOL="gemini"
 fi
 
-# ── Sanitizar strings de usuario antes de printf %b ──────────
+# ── Sanitizar strings externos antes de printf %b ────────────
+# Elimina backslashes y caracteres de control (0x00-0x1F, 0x7F)
 _san() { printf '%s' "$1" | tr -d '\\\000-\037\177'; }
 
 # ── Colores ANSI ──────────────────────────────────────────────
@@ -44,9 +45,24 @@ esac
 
 # ── Rama git del directorio actual ───────────────────────────
 _git_branch() {
-  local dir="$1"
-  if [ -n "$dir" ] && command -v git &>/dev/null; then
-    git -C "$dir" branch --show-current 2>/dev/null || true
+  [ -n "$1" ] && command -v git &>/dev/null &&
+    git -C "$1" branch --show-current 2>/dev/null || true
+}
+
+# ── Tiempo restante desde epoch Unix ─────────────────────────
+# $1 = resets_at (epoch segundos)  $2 = "h" para horas, "d" para días
+_remaining() {
+  local epoch="$1" mode="$2" diff hrs mins days
+  # Solo dígitos (seguridad: evitar inyección en aritmética bash)
+  case "$epoch" in ''|*[!0-9]*) echo ""; return ;; esac
+  diff=$(( epoch - _TS ))
+  [ "$diff" -le 0 ] && echo "" && return
+  if [ "$mode" = "d" ]; then
+    days=$(( diff / 86400 )); hrs=$(( (diff % 86400) / 3600 ))
+    [ "$days" -gt 0 ] && echo "${days}d${hrs}h" || echo "${hrs}h"
+  else
+    hrs=$(( diff / 3600 )); mins=$(( (diff % 3600) / 60 ))
+    [ "$hrs" -gt 0 ] && echo "${hrs}h${mins}m" || echo "${mins}m"
   fi
 }
 
@@ -54,13 +70,15 @@ _git_branch() {
 #  CLAUDE CODE
 # ═══════════════════════════════════════════════════════════════
 if [ "$TOOL" = "claude" ]; then
-  MODEL=$(   printf '%s' "$INPUT" | jq -r '.model.display_name // "–"')
-  PCT_RAW=$( printf '%s' "$INPUT" | jq -r '.context_window.used_percentage // 0')
-  COST=$(    printf '%s' "$INPUT" | jq -r '.cost.total_cost_usd // 0')
-  CWD=$(     printf '%s' "$INPUT" | jq -r '.cwd // ""')
-  FIVE_H=$(  printf '%s' "$INPUT" | jq -r 'if (.rate_limits.five_hour.used_percentage | type) == "number" then .rate_limits.five_hour.used_percentage else "" end')
-  SEVEN_D=$( printf '%s' "$INPUT" | jq -r 'if (.rate_limits.seven_day.used_percentage | type) == "number" then .rate_limits.seven_day.used_percentage else "" end')
-  PERMS=$(   printf '%s' "$INPUT" | jq -r '.permissions.mode // ""')
+  MODEL=$(    printf '%s' "$INPUT" | jq -r '.model.display_name // "–"')
+  PCT_RAW=$(  printf '%s' "$INPUT" | jq -r '.context_window.used_percentage // 0')
+  COST=$(     printf '%s' "$INPUT" | jq -r '.cost.total_cost_usd // 0')
+  CWD=$(      printf '%s' "$INPUT" | jq -r '.cwd // ""')
+  PERMS=$(    printf '%s' "$INPUT" | jq -r '.permissions.mode // ""')
+  FIVE_H=$(   printf '%s' "$INPUT" | jq -r 'if (.rate_limits.five_hour.used_percentage | type) == "number" then .rate_limits.five_hour.used_percentage else "" end')
+  SEVEN_D=$(  printf '%s' "$INPUT" | jq -r 'if (.rate_limits.seven_day.used_percentage | type) == "number" then .rate_limits.seven_day.used_percentage else "" end')
+  FH_RESET=$( printf '%s' "$INPUT" | jq -r '.rate_limits.five_hour.resets_at // ""')
+  SD_RESET=$( printf '%s' "$INPUT" | jq -r '.rate_limits.seven_day.resets_at // ""')
 
   MODEL=$(_san "$MODEL"); PERMS=$(_san "$PERMS")
   PROJECT=$(_san "$(basename "${CWD:-/unknown}")")
@@ -77,6 +95,7 @@ if [ "$TOOL" = "claude" ]; then
   done
   [ "$PCT" -ge 80 ] && CBAR="$RED" || { [ "$PCT" -ge 50 ] && CBAR="$YELLOW" || CBAR="$GREEN"; }
 
+  # Línea 1
   L1="${CYAN}⚡ ${MODEL}${R}"
   L1="${L1}${SEP}${CBAR}${BAR} ${PCT}%${R}"
   L1="${L1}${SEP}${DIM}${COST_FMT}${R}"
@@ -84,12 +103,20 @@ if [ "$TOOL" = "claude" ]; then
   [ -n "$GIT_BRANCH" ] && L1="${L1}${DIM} (${GIT_BRANCH})${R}"
   [ "$PERMS" = "auto" ] && L1="${L1}${SEP}${YELLOW}🔓 auto${R}"
 
+  # Línea 2 — rate limits con tiempo restante
   L2="${HEART}"
   if [ -n "$FIVE_H" ] && [ -n "$SEVEN_D" ]; then
     FH=$(printf '%.0f' "$FIVE_H"); SD=$(printf '%.0f' "$SEVEN_D")
     [ "$FH" -ge 80 ] && C5="$RED" || { [ "$FH" -ge 50 ] && C5="$YELLOW" || C5="$DIM"; }
     [ "$SD" -ge 80 ] && C7="$RED" || { [ "$SD" -ge 50 ] && C7="$YELLOW" || C7="$DIM"; }
-    L2="${L2} ${DIM}RESET${R} ${C5}⏳ 5h ${FH}%${R}${SEP}${C7}📅 7d ${SD}%${R}"
+
+    FH_REM=$(_remaining "$FH_RESET" "h")
+    SD_REM=$(_remaining "$SD_RESET" "d")
+
+    FH_DISP="${FH}%"; [ -n "$FH_REM" ] && FH_DISP="${FH}% (${FH_REM})"
+    SD_DISP="${SD}%"; [ -n "$SD_REM" ] && SD_DISP="${SD}% (${SD_REM})"
+
+    L2="${L2} ${DIM}RESET${R} ${C5}⏳ 5h ${FH_DISP}${R}${SEP}${C7}📅 7d ${SD_DISP}${R}"
   fi
 
   printf '%b\n' "$L1"
@@ -108,8 +135,7 @@ elif [ "$TOOL" = "codex" ]; then
   [ -z "$PROJECT" ] || [ "$PROJECT" = "/" ] && PROJECT="–"
   GIT_BRANCH=$(_san "$(_git_branch "$CWD")")
 
-  L1="${CYAN}◆ ${MODEL}${R}"
-  L1="${L1}${SEP}📁 ${PROJECT}"
+  L1="${CYAN}◆ ${MODEL}${R}${SEP}📁 ${PROJECT}"
   [ -n "$GIT_BRANCH" ] && L1="${L1}${DIM} (${GIT_BRANCH})${R}"
   [ -n "$PERMS" ] && L1="${L1}${SEP}${DIM}${PERMS}${R}"
 
@@ -128,8 +154,7 @@ elif [ "$TOOL" = "gemini" ]; then
   [ -z "$PROJECT" ] || [ "$PROJECT" = "/" ] && PROJECT="–"
   GIT_BRANCH=$(_san "$(_git_branch "$CWD")")
 
-  L1="${CYAN}♊ Gemini${R}"
-  L1="${L1}${SEP}📁 ${PROJECT}"
+  L1="${CYAN}♊ Gemini${R}${SEP}📁 ${PROJECT}"
   [ -n "$GIT_BRANCH" ] && L1="${L1}${DIM} (${GIT_BRANCH})${R}"
   [ -n "$EVENT" ] && L1="${L1}${SEP}${DIM}${EVENT}${R}"
 
@@ -137,7 +162,7 @@ elif [ "$TOOL" = "gemini" ]; then
   printf '%b\n' "   ${HEART}"
 
 # ═══════════════════════════════════════════════════════════════
-#  FALLBACK — JSON desconocido
+#  FALLBACK
 # ═══════════════════════════════════════════════════════════════
 else
   CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null || echo "")

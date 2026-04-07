@@ -16,8 +16,6 @@ umask 077
 # ── Globals ───────────────────────────────────────────────────────────────────
 GITHUB_RAW="https://raw.githubusercontent.com/ciberfobia-com/ciberclaude/main"
 INSTALL_PATH="${HOME}/.claude/ciberclaude.sh"
-SETTINGS="${HOME}/.claude/settings.json"
-SETTINGS_BAK="${HOME}/.claude/settings.json.bak"
 
 # ── Colores (desactivados automáticamente en pipe) ────────────────────────────
 if [ -t 1 ]; then
@@ -31,6 +29,7 @@ step() { printf "${CYAN}  -> %s${RESET}\n" "$*"; }
 ok()   { printf "${GREEN}  [ok] %s${RESET}\n" "$*"; }
 warn() { printf "${YELLOW}  [!]  %s${RESET}\n" "$*"; }
 fail() { printf "${RED}  [x]  %s${RESET}\n" "$*"; exit 1; }
+skip() { printf "${DIM}  --   %s${RESET}\n" "$*"; }
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 printf "${BOLD}${CYAN}"
@@ -42,26 +41,12 @@ cat <<'BANNER'
  | (__| | |_) |  __/ | | (__| | (_| | |_| | (_| |  __/
   \___|_|_.__/ \___|_|  \___|_|\__,_|\__,_|\__,_|\___|
 
-  statusline for claude code · by ciberfobia.com
+  AI coding statusline · by ciberfobia.com
 
 BANNER
 printf "${RESET}"
 
-# ── 1. Detectar Claude Code ───────────────────────────────────────────────────
-step "Comprobando Claude Code..."
-
-claude_found=0
-command -v claude >/dev/null 2>&1 && claude_found=1
-[ -d "${HOME}/.claude" ]          && claude_found=1
-
-if [ "$claude_found" -eq 1 ]; then
-  ok "Claude Code detectado"
-else
-  warn "Claude Code no detectado — instálalo en https://claude.ai/code"
-  warn "Continuando de todos modos (puedes instalarlo después)"
-fi
-
-# ── 2. Verificar jq ───────────────────────────────────────────────────────────
+# ── 1. Verificar jq ───────────────────────────────────────────────────────────
 step "Comprobando jq..."
 
 if command -v jq >/dev/null 2>&1; then
@@ -88,25 +73,21 @@ else
   exit 1
 fi
 
-# ── 3. Crear ~/.claude/ si no existe ─────────────────────────────────────────
+# ── 2. Crear ~/.claude/ si no existe ─────────────────────────────────────────
 if [ ! -d "${HOME}/.claude" ]; then
   step "Creando directorio ~/.claude/..."
   mkdir -p "${HOME}/.claude"
   ok "Directorio creado"
 fi
 
-# ── 4. Descargar ciberclaude.sh ───────────────────────────────────────────────
+# ── 3. Descargar ciberclaude.sh ───────────────────────────────────────────────
 if [ -f "$INSTALL_PATH" ]; then
   step "Instalación existente detectada — actualizando..."
 else
   step "Descargando ciberclaude.sh..."
 fi
 
-# Usar mktemp en el mismo directorio destino → mv atómico garantizado (mismo filesystem)
 TMP_DOWNLOAD=$(mktemp "${HOME}/.claude/ciberclaude.XXXXXX")
-trap 'rm -f "$TMP_DOWNLOAD"' EXIT
-
-# Archivo temporal para el error de curl (mktemp, no nombre fijo en /tmp)
 TMP_CURL_ERR=$(mktemp)
 trap 'rm -f "$TMP_DOWNLOAD" "$TMP_CURL_ERR"' EXIT
 
@@ -127,7 +108,6 @@ if [ "${file_size:-0}" -eq 0 ]; then
   fail "Archivo descargado vacío. Verifica tu conexión."
 fi
 
-# Verificar que es un script bash (protección mínima contra respuesta inesperada)
 first_line=$(head -1 "$TMP_DOWNLOAD")
 if [ "${first_line#\#!}" = "$first_line" ]; then
   fail "El archivo descargado no parece un script bash válido."
@@ -135,43 +115,79 @@ fi
 
 mv "$TMP_DOWNLOAD" "$INSTALL_PATH"
 chmod 700 "$INSTALL_PATH"
-
 ok "Script descargado (${file_size} bytes) → ${INSTALL_PATH}"
 
-# ── 5. Configurar settings.json ───────────────────────────────────────────────
-step "Configurando settings.json..."
+# ── Función: merge seguro de settings.json ────────────────────────────────────
+# $1 = ruta al settings.json  $2 = clave jq  $3 = valor JSON
+_merge_json() {
+  local settings="$1" key="$2" val="$3"
+  local bak="${settings}.bak" tmp
 
-STATUS_LINE_JSON='{"type":"command","command":"~/.claude/ciberclaude.sh"}'
+  if [ -f "$settings" ] && ! jq empty "$settings" 2>/dev/null; then
+    warn "$(basename "$settings") no es JSON válido — reemplazando (backup en .bak)"
+    cp "$settings" "$bak"
+    printf '%s\n' "{${key}:${val}}" > "$settings"
+    return 0
+  fi
 
-if [ -f "$SETTINGS" ]; then
-  if ! jq empty "$SETTINGS" 2>/dev/null; then
-    warn "settings.json no es JSON válido — se reemplaza (backup en .bak)"
-    cp "$SETTINGS" "${SETTINGS_BAK}"
-    printf '%s\n' "{\"statusLine\":${STATUS_LINE_JSON}}" > "$SETTINGS"
-    ok "settings.json creado (backup guardado)"
+  tmp=$(mktemp "$(dirname "$settings")/ciberclaude.XXXXXX")
+  if [ -f "$settings" ]; then
+    cp "$settings" "$bak"
+    jq --argjson v "$val" "${key} = \$v" "$bak" > "$tmp" && jq empty "$tmp" 2>/dev/null || {
+      rm -f "$tmp"; cp "$bak" "$settings"
+      warn "No se pudo actualizar $(basename "$settings") — sin cambios"
+      return 1
+    }
   else
-    cp "$SETTINGS" "${SETTINGS_BAK}"
-    # mktemp en el mismo directorio → mv atómico en mismo filesystem
-    TMP_SETTINGS=$(mktemp "${HOME}/.claude/settings.XXXXXX")
-    if jq --argjson sl "$STATUS_LINE_JSON" '.statusLine = $sl' "$SETTINGS_BAK" > "$TMP_SETTINGS" \
-       && jq empty "$TMP_SETTINGS" 2>/dev/null; then
-      mv "$TMP_SETTINGS" "$SETTINGS"
-      ok "settings.json actualizado (backup en settings.json.bak)"
-    else
-      rm -f "$TMP_SETTINGS"
-      cp "${SETTINGS_BAK}" "$SETTINGS"
-      fail "Error al actualizar settings.json — restaurado desde backup"
-    fi
+    mkdir -p "$(dirname "$settings")"
+    printf '%s\n' "{}" | jq --argjson v "$val" "${key} = \$v" > "$tmp"
+  fi
+  mv "$tmp" "$settings"
+}
+
+SCRIPT_REF='"~/.claude/ciberclaude.sh"'
+CONFIGURED=()
+
+# ── 4. Claude Code ────────────────────────────────────────────────────────────
+step "Buscando Claude Code..."
+claude_found=0
+command -v claude >/dev/null 2>&1 && claude_found=1
+[ -d "${HOME}/.claude" ] && claude_found=1
+
+if [ "$claude_found" -eq 1 ]; then
+  SETTINGS="${HOME}/.claude/settings.json"
+  STATUS_JSON="{\"type\":\"command\",\"command\":${SCRIPT_REF}}"
+  if _merge_json "$SETTINGS" '.statusLine' "$STATUS_JSON"; then
+    ok "Claude Code configurado → ${SETTINGS}"
+    CONFIGURED+=("Claude Code")
   fi
 else
-  printf '%s\n' "{\"statusLine\":${STATUS_LINE_JSON}}" > "$SETTINGS"
-  ok "settings.json creado"
+  skip "Claude Code no detectado"
 fi
 
-# ── 6. Verificación ───────────────────────────────────────────────────────────
-step "Verificando instalación..."
+# ── 5. Gemini CLI ─────────────────────────────────────────────────────────────
+step "Buscando Gemini CLI..."
+gemini_found=0
+command -v gemini >/dev/null 2>&1 && gemini_found=1
+[ -d "${HOME}/.gemini" ] && gemini_found=1
 
-TEST_JSON='{"cwd":"/tmp","model":{"display_name":"Opus"},"context_window":{"used_percentage":42},"cost":{"total_cost_usd":0.0021,"total_duration_ms":90000}}'
+if [ "$gemini_found" -eq 1 ]; then
+  GEMINI_SETTINGS="${HOME}/.gemini/settings.json"
+  # Hook para SessionStart: ejecuta ciberclaude.sh
+  HOOK_JSON='{"hooks":[{"type":"command","command":"~/.claude/ciberclaude.sh"}]}'
+  HOOKS_JSON="{\"SessionStart\":[${HOOK_JSON}]}"
+  if _merge_json "$GEMINI_SETTINGS" '.hooks' "$HOOKS_JSON"; then
+    ok "Gemini CLI configurado → ${GEMINI_SETTINGS}"
+    CONFIGURED+=("Gemini CLI")
+  fi
+else
+  skip "Gemini CLI no detectado"
+fi
+
+# ── 6. Verificación del script ────────────────────────────────────────────────
+step "Verificando script..."
+
+TEST_JSON='{"cwd":"/tmp","model":{"display_name":"Sonnet"},"context_window":{"used_percentage":42},"cost":{"total_cost_usd":0.031},"rate_limits":{"five_hour":{"used_percentage":18,"resets_at":1738425600},"seven_day":{"used_percentage":41,"resets_at":1738857600}}}'
 verify_out=$(printf '%s' "$TEST_JSON" | "$INSTALL_PATH" 2>/dev/null) || true
 
 if [ -n "$verify_out" ]; then
@@ -185,8 +201,14 @@ fi
 printf "\n"
 printf "${BOLD}${GREEN}  ✓ ciberclaude instalado correctamente${RESET}\n"
 printf "\n"
-printf "  ${DIM}Archivo  →${RESET}  %s\n" "$INSTALL_PATH"
-printf "  ${DIM}Config   →${RESET}  %s\n" "$SETTINGS"
+printf "  ${DIM}Script   →${RESET}  %s\n" "$INSTALL_PATH"
+
+if [ "${#CONFIGURED[@]}" -gt 0 ]; then
+  printf "  ${DIM}Activo en →${RESET}  %s\n" "$(printf '%s  ' "${CONFIGURED[@]}")"
+else
+  printf "  ${YELLOW}  [!]  Ninguna herramienta detectada — instala Claude Code, Gemini CLI o Codex CLI${RESET}\n"
+fi
+
 printf "\n"
 printf "  ${DIM}ciberclaude · by Ciberfobia · ciberfobia.com${RESET}\n"
 printf "\n"
